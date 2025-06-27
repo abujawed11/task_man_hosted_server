@@ -7,6 +7,7 @@ const fs = require('fs');
 const authMiddleware = require('../middleware/authMiddleware');
 const { generateId } = require('../utils/idGenerator');
 const { createNotification } = require('../utils/notify');
+const ExcelJS = require('exceljs');
 
 
 // Ensure uploads directory exists
@@ -103,6 +104,58 @@ router.get('/users/all', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Error fetching all task users:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+//Download Tasks in .xlsx
+router.get('/export', async (req, res) => {
+  const { mode, username } = req.query; // mode: my, assign, all
+
+  try {
+    let query = 'SELECT task_id, title, description, priority, status, due_date, assigned_to, created_by, created_at, updated_at FROM tasks';
+    let values = [];
+
+    if (mode === 'my') {
+      query += ' WHERE assigned_to = ?';
+      values.push(username);
+    } else if (mode === 'assign') {
+      query += ' WHERE created_by = ?';
+      values.push(username);
+    }
+
+    const [rows] = await pool.query(query, values);
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Tasks');
+
+    worksheet.columns = [
+      { header: 'Task ID', key: 'task_id', width: 12 },
+      { header: 'Title', key: 'title', width: 25 },
+      { header: 'Description', key: 'description', width: 30 },
+      { header: 'Priority', key: 'priority', width: 10 },
+      { header: 'Status', key: 'status', width: 12 },
+      { header: 'Due Date', key: 'due_date', width: 15 },
+      { header: 'Assigned To', key: 'assigned_to', width: 15 },
+      { header: 'Created By', key: 'created_by', width: 15 },
+      { header: 'Created At', key: 'created_at', width: 20 },
+      { header: 'Updated At', key: 'updated_at', width: 20 },
+    ];
+
+    rows.forEach(row => worksheet.addRow(row));
+
+    worksheet.getRow(1).eachCell(cell => {
+      cell.font = { bold: true };
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=tasks.xlsx');
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Excel export error:', err);
+    res.status(500).json({ message: 'Failed to export tasks' });
   }
 });
 
