@@ -51,40 +51,6 @@ router.get('/', authMiddleware, async (req, res) => {
 
 
 
-//not working code now
-// router.get('/', authMiddleware, async (req, res) => {
-//   const username = req.user.username;
-
-//   try {
-//     const [rows] = await pool.query(
-//       `SELECT 
-//          n.notification_id,
-//          n.task_id,
-//          n.sender,
-//          n.receiver,
-//          n.type,
-//          n.message,
-//          n.is_read,
-//          n.created_at,
-//          t.title AS task_title,
-//          t.priority,
-//          t.status,
-//          t.due_date,
-//          t.created_by AS task_creator
-//        FROM notifications n
-//        LEFT JOIN tasks t ON n.task_id = t.task_id
-//        WHERE n.receiver = ?
-//        AND n.is_read = 0
-//        ORDER BY n.created_at DESC`,
-//       [username]
-//     );
-//     res.json(rows);
-//   } catch (error) {
-//     console.error('Error fetching notifications:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
-
 
 //working---------------------------------------
 // router.get('/', authMiddleware, async (req, res) => {
