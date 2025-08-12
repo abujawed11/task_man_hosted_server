@@ -333,7 +333,9 @@ router.post('/send-otp', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   console.log('Received login request:', req.body); // Add log
-  const { username, password } = req.body;
+  const { username, password, device } = req.body;
+
+  const deviceType = device === 'mobile' ? 'mobile' : 'web';
 
   // Input validation
   if (!username || !password) {
@@ -358,7 +360,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ userId: user.user_id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign(
+      { userId: user.user_id, username: user.username },
+      process.env.JWT_SECRET,
+      deviceType === 'mobile' ? { expiresIn: '30d' } : { expiresIn: '1h' }
+    );
 
     const userData = {
       userId: user.user_id,
@@ -376,6 +382,51 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+// router.post('/login', async (req, res) => {
+//   console.log('Received login request:', req.body); // Add log
+//   const { username, password } = req.body;
+
+//   // Input validation
+//   if (!username || !password) {
+//     console.log('Validation failed: Missing fields');
+//     return res.status(400).json({ message: 'Username and password are required' });
+//   }
+
+//   try {
+//     // Find user
+//     const [users] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+//     if (users.length === 0) {
+//       console.log('Login failed: User not found:', username);
+//       return res.status(401).json({ message: 'Invalid credentials' });
+//     }
+
+//     const user = users[0];
+
+//     // Compare password
+//     const isMatch = await bcrypt.compare(password, user.password);
+//     if (!isMatch) {
+//       console.log('Login failed: Invalid password for user:', username);
+//       return res.status(401).json({ message: 'Invalid credentials' });
+//     }
+
+//     const token = jwt.sign({ userId: user.user_id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+//     const userData = {
+//       userId: user.user_id,
+//       username: user.username,
+//       email: user.email,
+//       phoneNumber: user.phone_number,
+//       role: user.role,
+//       accountType: user.account_type,
+//     };
+
+//     console.log('Login successful:', { userId: user.user_id, username }); // Add log
+//     res.status(200).json({ user: userData, token });
+//   } catch (error) {
+//     console.error('Login error:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 // Signup
 router.post('/signup', async (req, res) => {
