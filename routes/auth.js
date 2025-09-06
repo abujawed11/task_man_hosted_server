@@ -226,7 +226,7 @@ const pool = require('../config/db');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const { generateId } = require('../utils/idGenerator');
-const sgMail = require('@sendgrid/mail');
+const axios = require('axios');
 
 
 require('dotenv').config();
@@ -241,8 +241,44 @@ require('dotenv').config();
 // });
 
 
-// Set SendGrid API key
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+// Brevo email sending function
+const sendEmailWithBrevo = async (to, subject, textContent, htmlContent) => {
+  try {
+    const payload = {
+      sender: {
+        name: "TaskApp",
+        email: process.env.FROM_EMAIL
+      },
+      to: [{ email: to }],
+      subject: subject,
+      htmlContent: htmlContent
+    };
+    
+    // Add textContent only if provided
+    if (textContent) {
+      payload.textContent = textContent;
+    }
+
+    console.log('Sending email with payload:', JSON.stringify(payload, null, 2));
+    
+    const response = await axios.post('https://api.brevo.com/v3/smtp/email', payload, {
+      headers: {
+        'api-key': process.env.BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        'accept': 'application/json'
+      }
+    });
+    
+    console.log('Brevo response:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Brevo API error:', error.response?.data || error.message);
+    if (error.response?.data) {
+      console.error('Full error response:', JSON.stringify(error.response.data, null, 2));
+    }
+    throw new Error(`Brevo email error: ${error.response?.data?.message || error.message}`);
+  }
+};
 
 // Generate 6-digit OTP
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -257,27 +293,32 @@ router.post('/send-otp', async (req, res) => {
 
   const otp = generateOtp();
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
+  
+  console.log(`Current time: ${new Date()}`);
+  console.log(`Expires at: ${expiresAt}`);
+  
+  console.log(`Generated OTP for ${email}: ${otp}`);
 
   try {
     // Delete any existing OTP for the email
     await pool.query('DELETE FROM otps WHERE email = ?', [email]);
 
-    // Store the new OTP
+    // Store the new OTP with proper MySQL datetime format
+    const expiresAtFormatted = new Date(Date.now() + 5 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
     await pool.query(
       'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)',
-      [email, otp, expiresAt]
+      [email, otp, expiresAtFormatted]
     );
+    
+    console.log(`Stored OTP in database for ${email}: ${otp}`);
 
-    // Send the OTP email
-    const msg = {
-      to: email,
-      from: process.env.FROM_EMAIL,
-      subject: 'Your TaskApp OTP Code',
-      text: `Your OTP for TaskApp is ${otp}. It expires in 5 minutes.`,
-      html: `<strong>Your OTP for TaskApp is ${otp}</strong><br/><p>It expires in 5 minutes.</p>`,
-    };
-
-    await sgMail.send(msg);
+    // Send the OTP email via Brevo
+    await sendEmailWithBrevo(
+      email,
+      'Your TaskApp OTP Code',
+      `Your OTP for TaskApp is ${otp}. It expires in 5 minutes.`,
+      `<strong>Your OTP for TaskApp is ${otp}</strong><br/><p>It expires in 5 minutes.</p>`
+    );
     console.log(`OTP sent to ${email}: ${otp}`);
     res.status(200).json({ message: 'OTP sent successfully' });
   } catch (error) {
@@ -438,13 +479,34 @@ router.post('/signup', async (req, res) => {
   }
 
   try {
-    // Validate OTP
+    console.log(`Validating OTP for signup - Email: ${email}, OTP: ${otp}`);
+    
+    // First, check what OTPs exist for this email
+    const [allOtps] = await pool.query('SELECT * FROM otps WHERE email = ?', [email]);
+    console.log(`All OTPs in database for ${email}:`, allOtps);
+    
+    // Validate OTP with timezone-safe comparison
     const [otpRows] = await pool.query(
-      'SELECT * FROM otps WHERE email = ? AND otp = ? AND expires_at > NOW()',
+      'SELECT *, NOW() as db_current_time FROM otps WHERE email = ? AND otp = ?',
       [email, otp]
     );
+    console.log(`OTP validation result for ${email}:`, otpRows);
+    
     if (otpRows.length === 0) {
-      return res.status(400).json({ message: 'Invalid or expired OTP' });
+      return res.status(400).json({ message: 'Invalid OTP' });
+    }
+    
+    // Check if OTP is expired using JavaScript date comparison
+    const otpRecord = otpRows[0];
+    const currentTime = new Date();
+    const expirationTime = new Date(otpRecord.expires_at);
+    
+    console.log(`Current time: ${currentTime}`);
+    console.log(`OTP expires at: ${expirationTime}`);
+    console.log(`Is expired: ${currentTime > expirationTime}`);
+    
+    if (currentTime > expirationTime) {
+      return res.status(400).json({ message: 'Expired OTP' });
     }
 
     // Validate invite code for Super Admin
