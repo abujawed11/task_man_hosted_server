@@ -64,10 +64,6 @@ router.post('/send-otp', async (req, res) => {
   }
 
   const otp = generateOtp();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
-  
-  console.log(`Current time: ${new Date()}`);
-  console.log(`Expires at: ${expiresAt}`);
   
   console.log(`Generated OTP for ${email}: ${otp}`);
 
@@ -75,11 +71,10 @@ router.post('/send-otp', async (req, res) => {
     // Delete any existing OTP for the email
     await pool.query('DELETE FROM otps WHERE email = ?', [email]);
 
-    // Store the new OTP with proper MySQL datetime format
-    const expiresAtFormatted = new Date(Date.now() + 5 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    // Store the new OTP using MySQL's NOW() and INTERVAL for consistent timezone
     await pool.query(
-      'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)',
-      [email, otp, expiresAtFormatted]
+      'INSERT INTO otps (email, otp, created_at, expires_at) VALUES (?, ?, NOW(), NOW() + INTERVAL 5 MINUTE)',
+      [email, otp]
     );
     
     console.log(`Stored OTP in database for ${email}: ${otp}`);
@@ -311,18 +306,16 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     const otp = generateOtp();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
     console.log(`Generated password reset OTP for ${email}: ${otp}`);
 
     // Delete any existing OTP for the email
     await pool.query('DELETE FROM otps WHERE email = ?', [email]);
 
-    // Store the new OTP with proper MySQL datetime format
-    const expiresAtFormatted = expiresAt.toISOString().slice(0, 19).replace('T', ' ');
+    // Store the new OTP using MySQL's NOW() and INTERVAL for consistent timezone
     await pool.query(
-      'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)',
-      [email, otp, expiresAtFormatted]
+      'INSERT INTO otps (email, otp, created_at, expires_at) VALUES (?, ?, NOW(), NOW() + INTERVAL 5 MINUTE)',
+      [email, otp]
     );
 
     console.log(`Stored password reset OTP in database for ${email}: ${otp}`);
