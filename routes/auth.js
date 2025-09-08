@@ -82,9 +82,24 @@ router.post('/send-otp', async (req, res) => {
     // Send the OTP email via Brevo
     await sendEmailWithBrevo(
       email,
-      'Your TaskApp OTP Code',
-      `Your OTP for TaskApp is ${otp}. It expires in 5 minutes.`,
-      `<strong>Your OTP for TaskApp is ${otp}</strong><br/><p>It expires in 5 minutes.</p>`
+      'Account Verification OTP - TaskApp',
+      `Your account verification OTP for TaskApp is ${otp}. It expires in 5 minutes.`,
+      `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333; text-align: center;">Account Verification</h2>
+          <p>Welcome to TaskApp! Please verify your account to complete registration.</p>
+          <p>Use the OTP below to verify your account:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <div style="background-color: #FCD34D; color: #000; padding: 20px; border-radius: 8px; font-weight: bold; font-size: 24px; letter-spacing: 3px; display: inline-block;">
+              ${otp}
+            </div>
+          </div>
+          <p><strong>This OTP expires in 5 minutes.</strong></p>
+          <p>If you didn't request this verification, please ignore this email.</p>
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+          <p style="color: #666; font-size: 12px;">This is an automated email from TaskApp. Please do not reply.</p>
+        </div>
+      `
     );
     console.log(`OTP sent to ${email}: ${otp}`);
     res.status(200).json({ message: 'OTP sent successfully' });
