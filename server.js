@@ -94,9 +94,17 @@ app.use(cors({
 app.use(express.json());
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/notifications', notificationRoutes);
+
+const API_PREFIX = (process.env.API_PREFIX || '').replace(/\/+$/, ''); // no trailing slash
+
+
+app.use(`${API_PREFIX}/auth`, authRoutes);
+app.use(`${API_PREFIX}/tasks`, taskRoutes);
+app.use(`${API_PREFIX}/notifications`, notificationRoutes);
+
+// app.use('/api/auth', authRoutes);
+// app.use('/api/tasks', taskRoutes);
+// app.use('/api/notifications', notificationRoutes);
 // app.use('/api/health', require('./routes/healthcheck'));
 
 
