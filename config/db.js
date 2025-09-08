@@ -36,7 +36,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   charset: 'utf8mb4',
-  timezone: 'Z',
+  timezone: '+05:30',  // Asia/Kolkata timezone offset
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined
 });
 

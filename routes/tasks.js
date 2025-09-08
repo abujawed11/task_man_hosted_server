@@ -11,6 +11,7 @@ const ExcelJS = require('exceljs');
 const { sendPushNotification } = require('../utils/pushNotifications');
 
 
+
 // Ensure uploads directory exists
 const uploadDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -26,17 +27,7 @@ const storage = multer.diskStorage({
   },
 });
 
-// const fileFilter = (req, file, cb) => {
-//   const allowed = [
-//     'audio/mpeg',
-//     'audio/wav',
-//     'audio/webm',
-//     'application/pdf',
-//     'image/jpeg',
-//     'image/png',
-//   ];
-//   cb(null, allowed.includes(file.mimetype));
-// };
+
 
 const fileFilter = (req, file, cb) => {
   cb(null, true); // accept all types
@@ -55,7 +46,7 @@ const upload = multer({
 //fetch all Task for Admin
 router.get('/all', authMiddleware, async (req, res) => {
   try {
-    console.log("Getting All Tasks");
+    //console.log("Getting All Tasks");
 
     const [rows] = await pool.query(
       `SELECT t.task_id, t.title, t.description, t.priority, t.status, t.due_date,t.updated_at,
@@ -76,7 +67,7 @@ router.get('/all', authMiddleware, async (req, res) => {
        ) tu ON t.task_id = tu.task_id`
     );
 
-    //console.log("Sample task being sent:", rows[0]);
+    ////console.log("Sample task being sent:", rows[0]);
 
     res.json(rows);
   } catch (error) {
@@ -84,43 +75,6 @@ router.get('/all', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-
-//original server code working-------------
-// router.get('/all', authMiddleware, async (req, res) => {
-//   try {
-//     console.log("Getting All Tasks");
-
-//     const [rows] = await pool.query(
-//       `SELECT t.task_id, t.title, t.description, t.priority, t.status, t.due_date,
-//               COALESCE(tu.assigned_to, t.assigned_to) AS assigned_to,
-//               t.created_by,
-//               COALESCE(tu.updated_by, t.created_by) AS assigned_by,
-//               COALESCE(tu.updated_at, t.created_at) AS last_updated_at,
-//               t.audio_path, t.file_path, t.created_at
-//        FROM tasks t
-//        LEFT JOIN (
-//          SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
-//          FROM task_updates u1
-//          JOIN (
-//            SELECT task_id, MAX(updated_at) as max_time
-//            FROM task_updates
-//            WHERE assigned_to IS NOT NULL
-//            GROUP BY task_id
-//          ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-//        ) tu ON t.task_id = tu.task_id`
-//     );
-
-//     //console.log("Sample task being sent:", rows[0]);
-
-//     res.json(rows);
-//   } catch (error) {
-//     console.error('Error fetching all tasks:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
-
-
 
 
 
@@ -141,7 +95,7 @@ router.get('/users/all', authMiddleware, async (req, res) => {
 router.get('/dashboard', authMiddleware, async (req, res) => {
   try {
     const userName = req.user.username;
-    // console.log(userId)
+    // //console.log(userId)
     const [[{ assignedToMe }]] = await pool.query(
       'SELECT COUNT(*) AS assignedToMe FROM tasks WHERE assigned_to = ?',
       [userName]
@@ -181,9 +135,9 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 // Get list of all users for task assignment
 router.get('/list', authMiddleware, async (req, res) => {
   try {
-    console.log("list fetched");
+    //console.log("list fetched");
     const currentUserId = req.user.id;
-    // console.log(currentUserId)
+    // //console.log(currentUserId)
     const [rows] = await pool.query(
       'SELECT username FROM users WHERE user_id != ?', [currentUserId]
     );
@@ -213,9 +167,11 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
     const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
     const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
 
+    //console.log('🕐 [DEBUG] Creating task with database timezone (Asia/Kolkata)');
+
     await pool.query(
-      `INSERT INTO tasks (task_id, title, description, priority, status, assigned_to, created_by, audio_path, file_path, due_date)
-       VALUES (?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (task_id, title, description, priority, status, assigned_to, created_by, audio_path, file_path, due_date, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         taskId,
         title,
@@ -225,15 +181,15 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
         created_by,
         audioPath,
         filePath,
-        due_date || null,
+        due_date || null
       ]
     );
 
     // Insert initial task snapshot into task_updates
     await pool.query(
       `INSERT INTO task_updates 
-    (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment,       assigned_by, is_system_generated) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)`,
+    (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment, assigned_by, is_system_generated, updated_at) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         taskId,
         created_by,                 // updated_by
@@ -247,21 +203,10 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
         filePath,
         'Initial task assignment',  // comment
         created_by,
-        true                  // assigned_by
+        true                        // is_system_generated
       ]
     );
 
-    // ...after task insertion
-    // await createNotification(assigned_to, `New task "${title}" has been assigned to you by ${created_by}`);
-
-    // await createNotification({
-    //   task_id: taskId,
-    //   sender: created_by,
-    //   receiver: assigned_to,
-    //   type: 'task_created',
-    //   // message: `New task "${title}" has been assigned to you by ${created_by}`
-    //   message: title
-    // });
 
     await sendPushNotification(
       assigned_to,
@@ -291,17 +236,26 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
 router.get('/assigned', authMiddleware, async (req, res) => {
   try {
     const username = req.user.username;
-    console.log('Fetching tasks for user:', username);
-    // const [rows] = await pool.query(
-    //   `SELECT task_id, title, description, priority, status, due_date, created_by, audio_path, file_path, created_at
-    //    FROM tasks WHERE assigned_to = ?`,
-    //   [username]
-    // );
+    //console.log('🔍 [DEBUG] Fetching tasks for user:', username);
+    
     const [rows] = await pool.query(
       `SELECT * from tasks where assigned_to = ?`,
       [username]
     );
 
+    // 🐛 DEBUG: Log what database actually returns
+    if (rows && rows.length > 0) {
+      //console.log('🐛 [DEBUG] Sample task from database:');
+      //console.log('📅 created_at (raw):', rows[0].created_at);
+      //console.log('📅 created_at (type):', typeof rows[0].created_at);
+      //console.log('📅 created_at (toString):', rows[0].created_at?.toString());
+      //console.log('📅 updated_at (raw):', rows[0].updated_at);
+      //console.log('📅 due_date (raw):', rows[0].due_date);
+      //console.log('🕐 Current server time:', new Date());
+      //console.log('🌍 Server timezone:', Intl.DateTimeFormat().resolvedOptions().timeZone);
+    } else {
+      //console.log('🐛 [DEBUG] No tasks found for user:', username);
+    }
 
     res.json(rows);
   } catch (error) {
@@ -310,79 +264,28 @@ router.get('/assigned', authMiddleware, async (req, res) => {
   }
 });
 
-// router.get('/assigned', authMiddleware, async (req, res) => {
-//   try {
-//     const username = req.user.username;
-//     console.log('Fetching tasks for user:', username);
-//     // const [rows] = await pool.query(
-//     //   `SELECT task_id, title, description, priority, status, due_date, created_by, audio_path, file_path, created_at
-//     //    FROM tasks WHERE assigned_to = ?`,
-//     //   [username]
-//     // );
-//     const [rows] = await pool.query(
-//       `SELECT t.*, 
-//               COALESCE(tu.assigned_by, t.created_by) AS assigned_by,
-//               COALESCE(tu.updated_at, t.created_at) AS last_updated_at
-//         FROM tasks t
-//         LEFT JOIN (
-//             SELECT u1.task_id, u1.assigned_to, u1.assigned_by, u1.updated_at
-//             FROM task_updates u1
-//             JOIN (
-//                 SELECT task_id, MAX(updated_at) as max_time
-//                 FROM task_updates
-//                 WHERE assigned_to IS NOT NULL
-//                 GROUP BY task_id
-//             ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-//         ) tu ON t.task_id = tu.task_id
-//         WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
-//       // `SELECT t.*, 
-//       //     COALESCE(tu.updated_by, t.created_by) AS assigned_by,
-//       //     COALESCE(tu.updated_at, t.created_at) AS last_updated_at
-//       //     FROM tasks t
-//       //     LEFT JOIN (
-//       //         SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
-//       //         FROM task_updates u1
-//       //         JOIN (
-//       //             SELECT task_id, MAX(updated_at) as max_time
-//       //             FROM task_updates
-//       //             WHERE assigned_to IS NOT NULL
-//       //             GROUP BY task_id
-//       //         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-//       //     ) tu ON t.task_id = tu.task_id
-//       //     WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
-//       //   `SELECT t.*
-//       //  FROM tasks t
-//       //  LEFT JOIN (
-//       //      SELECT u1.task_id, u1.assigned_to
-//       //      FROM task_updates u1
-//       //      JOIN (
-//       //          SELECT task_id, MAX(updated_at) as max_time
-//       //          FROM task_updates
-//       //          WHERE assigned_to IS NOT NULL
-//       //          GROUP BY task_id
-//       //      ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-//       //  ) tu ON t.task_id = tu.task_id
-//       //  WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
-//       [username]
-//     );
-
-
-//     res.json(rows);
-//   } catch (error) {
-//     console.error('Error fetching assigned tasks:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
 
 // Get tasks created by the logged-in user (i.e., assigned by them)
 router.get('/created-by-me', authMiddleware, async (req, res) => {
   try {
     const username = req.user.username;
+    //console.log('🔍 [DEBUG] Fetching created-by-me tasks for user:', username);
+    
     const [rows] = await pool.query(
       `SELECT task_id, title, description, priority, status, due_date, assigned_to, audio_path, file_path, created_at, updated_at
        FROM tasks WHERE created_by = ?`,
       [username]
     );
+
+    // 🐛 DEBUG: Log what database actually returns
+    if (rows && rows.length > 0) {
+      //console.log('🐛 [DEBUG] Sample created-by-me task from database:');
+      //console.log('📅 created_at (raw):', rows[0].created_at);
+      //console.log('📅 created_at (type):', typeof rows[0].created_at);
+      //console.log('📅 updated_at (raw):', rows[0].updated_at);
+      //console.log('📅 due_date (raw):', rows[0].due_date);
+    }
+
     res.json(rows);
   } catch (error) {
     console.error('Error fetching assigned tasks:', error);
@@ -443,36 +346,6 @@ router.get('/export', async (req, res) => {
   }
 });
 
-// router.get('/created-by-me', authMiddleware, async (req, res) => {
-//   try {
-//     const username = req.user.username;
-
-//     const [rows] = await pool.query(
-//       `SELECT t.task_id, t.title, t.description, t.priority, t.status, t.due_date,
-//               COALESCE(tu.assigned_to, t.assigned_to) AS assigned_to,
-//               COALESCE(tu.updated_at, t.created_at) AS last_updated_at,
-//               t.audio_path, t.file_path, t.created_at
-//        FROM tasks t
-//        LEFT JOIN (
-//          SELECT u1.task_id, u1.assigned_to, u1.updated_at
-//          FROM task_updates u1
-//          JOIN (
-//            SELECT task_id, MAX(updated_at) as max_time
-//            FROM task_updates
-//            WHERE assigned_to IS NOT NULL
-//            GROUP BY task_id
-//          ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-//        ) tu ON t.task_id = tu.task_id
-//        WHERE t.created_by = ?`,
-//       [username]
-//     );
-
-//     res.json(rows);
-//   } catch (error) {
-//     console.error('Error fetching tasks created by user:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
 
 // GET a single task by ID
 router.get('/:taskId', authMiddleware, async (req, res) => {
@@ -577,7 +450,20 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
       }
 
       if (fieldsToUpdate.length > 0) {
-        fieldsToUpdate.push('updated_at = CURRENT_TIMESTAMP');
+        // Create IST timestamp for updated_at (MySQL format: YYYY-MM-DD HH:MM:SS)
+        const nowIST = new Date().toLocaleString("en-CA", {
+          timeZone: "Asia/Kolkata",
+          year: 'numeric',
+          month: '2-digit', 
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        }).replace(', ', ' ');
+        fieldsToUpdate.push('updated_at = ?');
+        updateValues.push(nowIST);
+        
         await pool.query(
           `UPDATE tasks SET ${fieldsToUpdate.join(', ')} WHERE task_id = ?`,
           [...updateValues, taskId]
@@ -586,23 +472,45 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
     }
     else
       if (status && status !== task.status) {
+        const nowIST = new Date().toLocaleString("en-CA", {
+          timeZone: "Asia/Kolkata",
+          year: 'numeric',
+          month: '2-digit', 
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        }).replace(', ', ' ');
         await pool.query(
-          `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+          `UPDATE tasks SET status = ?, updated_at = NOW() WHERE task_id = ?`,
           [status, taskId]
         );
       }
 
+    // Final timestamp update for task
+    //console.log('🕐 [DEBUG] Updating task with database timezone (Asia/Kolkata)');
     await pool.query(
-      `UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+      `UPDATE tasks SET updated_at = NOW() WHERE task_id = ?`,
       [taskId]
     );
     // }
     // }
 
     // 3. Insert into task_updates table only changed fields
-    const columns = ['task_id', 'updated_by'];
-    const placeholders = ['?', '?'];
-    const values = [taskId, username];
+    const updateIST = new Date().toLocaleString("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: 'numeric',
+      month: '2-digit', 
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).replace(', ', ' ');
+    const columns = ['task_id', 'updated_by', 'updated_at'];
+    const placeholders = ['?', '?', '?'];
+    const values = [taskId, username, updateIST];
 
     if (status && status !== task.status) {
       columns.push('status');
@@ -729,336 +637,6 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-
-
-// router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
-//   const taskId = req.params.taskId;
-//   const username = req.user.username;
-//   const { status, title, description, due_date, priority, comment, assigned_to } = req.body;
-
-//   const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
-//   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
-
-//   try {
-//     // Get task and role info
-//     const [taskRows] = await pool.query(
-//       `SELECT t.*, u.account_type FROM tasks t 
-//        JOIN users u ON u.username = ? 
-//        WHERE t.task_id = ?`,
-//       [username, taskId]
-//     );
-
-//     const task = taskRows[0];
-//     if (!task) return res.status(404).json({ message: 'Task not found' });
-
-//     const isPrivilegedUser = (task.created_by === username || task.account_type === 'Super Admin');
-//     const fieldsToUpdate = [];
-//     const updateValues = [];
-//     const updatedFields = {}; // <--- For notification
-
-//     // Update tasks table
-//     if (isPrivilegedUser) {
-//       if (title && title !== task.title) {
-//         fieldsToUpdate.push('title = ?');
-//         updateValues.push(title);
-//         updatedFields.title = title;
-//       }
-//       if (description && description !== task.description) {
-//         fieldsToUpdate.push('description = ?');
-//         updateValues.push(description);
-//         updatedFields.description = description;
-//       }
-//       if (priority && priority !== task.priority) {
-//         fieldsToUpdate.push('priority = ?');
-//         updateValues.push(priority);
-//         updatedFields.priority = priority;
-//       }
-//       if (status && status !== task.status) {
-//         fieldsToUpdate.push('status = ?');
-//         updateValues.push(status);
-//         updatedFields.status = status;
-//       }
-//       if (due_date && due_date !== task.due_date?.toISOString().split('T')[0]) {
-//         fieldsToUpdate.push('due_date = ?');
-//         updateValues.push(due_date);
-//         updatedFields.due_date = due_date;
-//       }
-//       if (assigned_to && assigned_to !== task.assigned_to) {
-//         fieldsToUpdate.push('assigned_to = ?');
-//         updateValues.push(assigned_to);
-//         updatedFields.assigned_to = assigned_to;
-//       }
-//     } else {
-//       if (status && status !== task.status) {
-//         fieldsToUpdate.push('status = ?');
-//         updateValues.push(status);
-//         updatedFields.status = status;
-//       }
-//     }
-
-//     if (audioPath) {
-//       fieldsToUpdate.push('audio_path = ?');
-//       updateValues.push(audioPath);
-//       updatedFields.audio_path = "Audio attached";
-//     }
-//     if (filePath) {
-//       fieldsToUpdate.push('file_path = ?');
-//       updateValues.push(filePath);
-//       updatedFields.file_path = "File attached";
-//     }
-
-//     if (fieldsToUpdate.length > 0) {
-//       fieldsToUpdate.push('updated_at = CURRENT_TIMESTAMP');
-//       await pool.query(
-//         `UPDATE tasks SET ${fieldsToUpdate.join(', ')} WHERE task_id = ?`,
-//         [...updateValues, taskId]
-//       );
-//     }
-
-//     // Insert update snapshot
-//     const updateCols = ['task_id', 'updated_by'];
-//     const placeholders = ['?', '?'];
-//     const values = [taskId, username];
-
-//     for (const [field, val] of Object.entries(updatedFields)) {
-//       updateCols.push(field);
-//       placeholders.push('?');
-//       values.push(val);
-//     }
-
-//     if (comment) {
-//       updateCols.push('comment');
-//       placeholders.push('?');
-//       values.push(comment);
-//       updatedFields.comment = comment;
-//     }
-
-//     if (assigned_to && assigned_to !== task.assigned_to) {
-//       updateCols.push('assigned_by');
-//       placeholders.push('?');
-//       values.push(username);
-//     }
-
-//     await pool.query(
-//       `INSERT INTO task_updates (${updateCols.join(', ')}) VALUES (${placeholders.join(', ')})`,
-//       values
-//     );
-
-//     // Notification when assignee is chaned
-//     if (assigned_to && assigned_to !== task.assigned_to && assigned_to !== username) {
-//       await createNotification({
-//         task_id: taskId,
-//         sender: username,
-//         receiver: assigned_to,
-//         type: 'task_reassigned',
-//         message: title,
-//         updates: updatedFields
-//       });
-//     }
-
-//     // Notification when updated by assignee to assigner
-//     if (task.created_by !== username && task.assigned_to === username) {
-//       await createNotification({
-//         task_id: taskId,
-//         sender: username,
-//         receiver: task.created_by,
-//         type: 'task_updated',
-//         message: null, // frontend will handle formatting
-//         updates: updatedFields
-//       });
-//     }
-
-
-//      // Notification when updated by assigneer to assignee
-//     if (task.created_by === username) {
-//       await createNotification({
-//         task_id: taskId,
-//         sender: username,
-//         receiver: assigned_to,
-//         type: 'task_updated_by_creator',
-//         message: null, // frontend will handle formatting
-//         updates: updatedFields
-//       });
-//     }
-
-
-//     res.json({ message: 'Task updated and changes notified' });
-//   } catch (err) {
-//     console.error('Error in update:', err);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
-
-
-//--------working---------------------
-// router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
-//   const taskId = req.params.taskId;
-//   const username = req.user.username;
-//   const { status, title, description, due_date, priority, comment, assigned_to } = req.body;
-
-//   const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
-//   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
-
-//   try {
-//     // 1. Fetch task + account_type
-//     const [taskRows] = await pool.query(
-//       `SELECT t.*, u.account_type 
-//        FROM tasks t 
-//        JOIN users u ON u.username = ? 
-//        WHERE t.task_id = ?`,
-//       [username, taskId]
-//     );
-
-//     const task = taskRows[0];
-//     if (!task) return res.status(404).json({ message: 'Task not found' });
-
-//     const isPrivilegedUser = (task.created_by === username || task.account_type === 'Super Admin');
-
-//     const fieldsToUpdate = [];
-//     const updateValues = [];
-
-//     // 2. Update tasks table if needed
-//     if (isPrivilegedUser) {
-//       if (title && title !== task.title) {
-//         fieldsToUpdate.push('title = ?');
-//         updateValues.push(title);
-//       }
-//       if (description && description !== task.description) {
-//         fieldsToUpdate.push('description = ?');
-//         updateValues.push(description);
-//       }
-//       if (priority && priority !== task.priority) {
-//         fieldsToUpdate.push('priority = ?');
-//         updateValues.push(priority);
-//       }
-//       if (status && status !== task.status) {
-//         fieldsToUpdate.push('status = ?');
-//         updateValues.push(status);
-//       }
-//       if (due_date && due_date !== task.due_date?.toISOString().split('T')[0]) {
-//         fieldsToUpdate.push('due_date = ?');
-//         updateValues.push(due_date);
-//       }
-//       if (assigned_to && assigned_to !== task.assigned_to) {
-//         fieldsToUpdate.push('assigned_to = ?');
-//         updateValues.push(assigned_to);
-//       }
-
-//       if (fieldsToUpdate.length > 0) {
-//         fieldsToUpdate.push('updated_at = CURRENT_TIMESTAMP');
-//         await pool.query(
-//           `UPDATE tasks SET ${fieldsToUpdate.join(', ')} WHERE task_id = ?`,
-//           [...updateValues, taskId]
-//         );
-//       }
-//     } else {
-//       if (status && status !== task.status) {
-//         await pool.query(
-//           `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
-//           [status, taskId]
-//         );
-//       }
-//     }
-
-//     // 3. Insert into task_updates table only changed fields
-//     const columns = ['task_id', 'updated_by'];
-//     const placeholders = ['?', '?'];
-//     const values = [taskId, username];
-
-//     if (status && status !== task.status) {
-//       columns.push('status');
-//       placeholders.push('?');
-//       values.push(status);
-//     }
-//     if (title && title !== task.title) {
-//       columns.push('title');
-//       placeholders.push('?');
-//       values.push(title);
-//     }
-//     if (description && description !== task.description) {
-//       columns.push('description');
-//       placeholders.push('?');
-//       values.push(description);
-//     }
-//     if (priority && priority !== task.priority) {
-//       columns.push('priority');
-//       placeholders.push('?');
-//       values.push(priority);
-//     }
-//     if (due_date && due_date !== task.due_date?.toISOString().split('T')[0]) {
-//       columns.push('due_date');
-//       placeholders.push('?');
-//       values.push(due_date);
-//     }
-//     if (assigned_to && assigned_to !== task.assigned_to) {
-//       columns.push('assigned_to');
-//       placeholders.push('?');
-//       values.push(assigned_to);
-//       columns.push('assigned_by');
-//       placeholders.push('?');
-//       values.push(username);
-//     }
-//     if (comment) {
-//       columns.push('comment');
-//       placeholders.push('?');
-//       values.push(comment);
-//     }
-//     if (audioPath) {
-//       columns.push('audio_path');
-//       placeholders.push('?');
-//       values.push(audioPath);
-//     }
-//     if (filePath) {
-//       columns.push('file_path');
-//       placeholders.push('?');
-//       values.push(filePath);
-//     }
-
-//     await pool.query(
-//       `INSERT INTO task_updates (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`,
-//       values
-//     );
-
-//     // 4. Notifications
-//     // if (task.created_by && task.created_by !== username) {
-//     //   await createNotification(task.created_by, `Task "${task.title}" updated by ${username}`);
-//     // }
-//     if (task.created_by && task.created_by !== username) {
-//       await createNotification({
-//         task_id: taskId,
-//         sender: username,
-//         receiver: task.created_by,
-//         type: 'task_updated',
-//         // message: `Task "${task.title}" was updated by ${username}`
-//         message: task.title
-//       });
-//     }
-
-
-//     // if (assigned_to && assigned_to !== task.assigned_to && assigned_to !== username) {
-//     //   await createNotification(assigned_to, `You were assigned task "${task.title}" by ${username}`);
-//     // }
-
-//     if (assigned_to && assigned_to !== task.assigned_to && assigned_to !== username) {
-//       await createNotification({
-//         task_id: taskId,
-//         sender: username,
-//         receiver: assigned_to,
-//         type: 'task_reassigned',
-//         // message: `You were assigned task "${task.title}" by ${username}`
-//         message: task.title
-//       });
-//     }
-
-//     res.json({ message: 'Task updated and logged successfully' });
-
-//   } catch (err) {
-//     console.error('Update failed:', err);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
-
 
 
 // progress
