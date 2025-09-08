@@ -7,6 +7,7 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const { generateId } = require('../utils/idGenerator');
 const axios = require('axios');
+const crypto = require('crypto');
 
 
 require('dotenv').config();
@@ -291,6 +292,124 @@ router.get('/me', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Error fetching user:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Forgot Password - Send reset token to email
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+    return res.status(400).json({ message: 'Valid email is required' });
+  }
+
+  try {
+    // Check if user exists
+    const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (users.length === 0) {
+      // For security, always return success even if email doesn't exist
+      return res.status(200).json({ message: 'If the email exists, a reset link has been sent' });
+    }
+
+    const user = users[0];
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // Delete any existing tokens for this email
+    await pool.query('DELETE FROM password_reset_tokens WHERE email = ?', [email]);
+
+    // Store new token
+    const expiresAtFormatted = resetTokenExpiry.toISOString().slice(0, 19).replace('T', ' ');
+    await pool.query(
+      'INSERT INTO password_reset_tokens (email, token, expires_at) VALUES (?, ?, ?)',
+      [email, resetToken, expiresAtFormatted]
+    );
+
+    // Create reset link
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
+
+    // Send password reset email
+    await sendEmailWithBrevo(
+      email,
+      'Password Reset Request - TaskApp',
+      `You requested a password reset for your TaskApp account. Click the link to reset your password: ${resetLink} This link expires in 1 hour.`,
+      `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333; text-align: center;">Password Reset Request</h2>
+          <p>You requested a password reset for your TaskApp account.</p>
+          <p>Click the button below to reset your password:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetLink}" 
+               style="background-color: #FCD34D; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+              Reset Password
+            </a>
+          </div>
+          <p><strong>This link expires in 1 hour.</strong></p>
+          <p>If you didn't request this password reset, please ignore this email.</p>
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+          <p style="color: #666; font-size: 12px;">This is an automated email from TaskApp. Please do not reply.</p>
+        </div>
+      `
+    );
+
+    console.log(`Password reset email sent to ${email}`);
+    res.status(200).json({ message: 'If the email exists, a reset link has been sent' });
+  } catch (error) {
+    console.error('Error in forgot password:', error);
+    res.status(500).json({ message: 'Failed to process password reset request' });
+  }
+});
+
+// Reset Password - Verify token and update password
+router.post('/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+
+  if (!token || !newPassword) {
+    return res.status(400).json({ message: 'Token and new password are required' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+  }
+
+  try {
+    // Find valid token
+    const [tokenRows] = await pool.query(
+      'SELECT * FROM password_reset_tokens WHERE token = ? AND used = FALSE',
+      [token]
+    );
+
+    if (tokenRows.length === 0) {
+      return res.status(400).json({ message: 'Invalid or expired reset token' });
+    }
+
+    const tokenRecord = tokenRows[0];
+    const currentTime = new Date();
+    const expirationTime = new Date(tokenRecord.expires_at);
+
+    if (currentTime > expirationTime) {
+      return res.status(400).json({ message: 'Reset token has expired' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user password
+    await pool.query('UPDATE users SET password = ? WHERE email = ?', [
+      hashedPassword,
+      tokenRecord.email
+    ]);
+
+    // Mark token as used
+    await pool.query('UPDATE password_reset_tokens SET used = TRUE WHERE token = ?', [token]);
+
+    console.log(`Password reset successful for email: ${tokenRecord.email}`);
+    res.status(200).json({ message: 'Password reset successful' });
+  } catch (error) {
+    console.error('Error in reset password:', error);
+    res.status(500).json({ message: 'Failed to reset password' });
   }
 });
 
