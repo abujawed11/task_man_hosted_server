@@ -307,46 +307,42 @@ router.post('/forgot-password', async (req, res) => {
     // Check if user exists
     const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
     if (users.length === 0) {
-      // For security, always return success even if email doesn't exist
-      return res.status(200).json({ message: 'If the email exists, a reset link has been sent' });
+      return res.status(400).json({ message: 'Email not registered. Please check your email or sign up.' });
     }
 
-    const user = users[0];
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    console.log(`Generated password reset OTP for ${email}: ${otp}`);
 
-    // Delete any existing tokens for this email
-    await pool.query('DELETE FROM password_reset_tokens WHERE email = ?', [email]);
+    // Delete any existing OTP for the email
+    await pool.query('DELETE FROM otps WHERE email = ?', [email]);
 
-    // Store new token
-    const expiresAtFormatted = resetTokenExpiry.toISOString().slice(0, 19).replace('T', ' ');
+    // Store the new OTP with proper MySQL datetime format
+    const expiresAtFormatted = expiresAt.toISOString().slice(0, 19).replace('T', ' ');
     await pool.query(
-      'INSERT INTO password_reset_tokens (email, token, expires_at) VALUES (?, ?, ?)',
-      [email, resetToken, expiresAtFormatted]
+      'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)',
+      [email, otp, expiresAtFormatted]
     );
 
-    // Create reset link
-    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
+    console.log(`Stored password reset OTP in database for ${email}: ${otp}`);
 
-    // Send password reset email
+    // Send the password reset OTP email via Brevo
     await sendEmailWithBrevo(
       email,
-      'Password Reset Request - TaskApp',
-      `You requested a password reset for your TaskApp account. Click the link to reset your password: ${resetLink} This link expires in 1 hour.`,
+      'Password Reset OTP - TaskApp',
+      `Your password reset OTP for TaskApp is ${otp}. It expires in 5 minutes.`,
       `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333; text-align: center;">Password Reset Request</h2>
           <p>You requested a password reset for your TaskApp account.</p>
-          <p>Click the button below to reset your password:</p>
+          <p>Use the OTP below to reset your password:</p>
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${resetLink}" 
-               style="background-color: #FCD34D; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
-              Reset Password
-            </a>
+            <div style="background-color: #FCD34D; color: #000; padding: 20px; border-radius: 8px; font-weight: bold; font-size: 24px; letter-spacing: 3px; display: inline-block;">
+              ${otp}
+            </div>
           </div>
-          <p><strong>This link expires in 1 hour.</strong></p>
+          <p><strong>This OTP expires in 5 minutes.</strong></p>
           <p>If you didn't request this password reset, please ignore this email.</p>
           <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
           <p style="color: #666; font-size: 12px;">This is an automated email from TaskApp. Please do not reply.</p>
@@ -354,20 +350,20 @@ router.post('/forgot-password', async (req, res) => {
       `
     );
 
-    console.log(`Password reset email sent to ${email}`);
-    res.status(200).json({ message: 'If the email exists, a reset link has been sent' });
+    console.log(`Password reset OTP sent to ${email}: ${otp}`);
+    res.status(200).json({ message: 'If the email exists, an OTP has been sent' });
   } catch (error) {
-    console.error('Error in forgot password:', error);
+    console.error('Error in forgot password:', error.response?.body || error.message);
     res.status(500).json({ message: 'Failed to process password reset request' });
   }
 });
 
-// Reset Password - Verify token and update password
+// Reset Password - Verify OTP and update password
 router.post('/reset-password', async (req, res) => {
-  const { token, newPassword } = req.body;
+  const { email, otp, newPassword } = req.body;
 
-  if (!token || !newPassword) {
-    return res.status(400).json({ message: 'Token and new password are required' });
+  if (!email || !otp || !newPassword) {
+    return res.status(400).json({ message: 'Email, OTP, and new password are required' });
   }
 
   if (newPassword.length < 6) {
@@ -375,22 +371,36 @@ router.post('/reset-password', async (req, res) => {
   }
 
   try {
-    // Find valid token
-    const [tokenRows] = await pool.query(
-      'SELECT * FROM password_reset_tokens WHERE token = ? AND used = FALSE',
-      [token]
+    console.log(`Validating password reset OTP - Email: ${email}, OTP: ${otp}`);
+    
+    // Validate OTP with timezone-safe comparison
+    const [otpRows] = await pool.query(
+      'SELECT *, NOW() as db_current_time FROM otps WHERE email = ? AND otp = ?',
+      [email, otp]
     );
-
-    if (tokenRows.length === 0) {
-      return res.status(400).json({ message: 'Invalid or expired reset token' });
+    console.log(`OTP validation result for ${email}:`, otpRows);
+    
+    if (otpRows.length === 0) {
+      return res.status(400).json({ message: 'Invalid OTP' });
+    }
+    
+    // Check if OTP is expired using JavaScript date comparison
+    const otpRecord = otpRows[0];
+    const currentTime = new Date();
+    const expirationTime = new Date(otpRecord.expires_at);
+    
+    console.log(`Current time: ${currentTime}`);
+    console.log(`OTP expires at: ${expirationTime}`);
+    console.log(`Is expired: ${currentTime > expirationTime}`);
+    
+    if (currentTime > expirationTime) {
+      return res.status(400).json({ message: 'Expired OTP' });
     }
 
-    const tokenRecord = tokenRows[0];
-    const currentTime = new Date();
-    const expirationTime = new Date(tokenRecord.expires_at);
-
-    if (currentTime > expirationTime) {
-      return res.status(400).json({ message: 'Reset token has expired' });
+    // Check if user exists
+    const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (users.length === 0) {
+      return res.status(400).json({ message: 'User not found' });
     }
 
     // Hash new password
@@ -399,13 +409,13 @@ router.post('/reset-password', async (req, res) => {
     // Update user password
     await pool.query('UPDATE users SET password = ? WHERE email = ?', [
       hashedPassword,
-      tokenRecord.email
+      email
     ]);
 
-    // Mark token as used
-    await pool.query('UPDATE password_reset_tokens SET used = TRUE WHERE token = ?', [token]);
+    // Delete OTP after successful reset
+    await pool.query('DELETE FROM otps WHERE email = ?', [email]);
 
-    console.log(`Password reset successful for email: ${tokenRecord.email}`);
+    console.log(`Password reset successful for email: ${email}`);
     res.status(200).json({ message: 'Password reset successful' });
   } catch (error) {
     console.error('Error in reset password:', error);
