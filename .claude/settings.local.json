@@ -4,7 +4,8 @@
       "Bash(npm install:*)",
       "Bash(npm uninstall:*)",
       "WebFetch(domain:developers.brevo.com)",
-      "WebSearch"
+      "WebSearch",
+      "PowerShell(npm install *)"
     ],
     "deny": [],
     "ask": []
